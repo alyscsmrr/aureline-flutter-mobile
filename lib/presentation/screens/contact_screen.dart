@@ -11,7 +11,25 @@ class ContactScreen extends StatelessWidget {
         backgroundColor: cream,
         body: SafeArea(
           child: CustomScrollView(slivers: [
-            const SliverToBoxAdapter(child: PublicHeader()),
+            SliverToBoxAdapter(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFFEFB),
+                  border: Border(bottom: BorderSide(color: border)),
+                ),
+                padding: const EdgeInsets.fromLTRB(22, 16, 22, 16),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.arrow_back, color: forest),
+                    ),
+                    const SizedBox(width: 12),
+                    const Brand(),
+                  ],
+                ),
+              ),
+            ),
             const SliverToBoxAdapter(child: Padding(
               padding: EdgeInsets.fromLTRB(25, 50, 25, 35),
               child: Column(crossAxisAlignment: CrossAxisAlignment.center, children: [

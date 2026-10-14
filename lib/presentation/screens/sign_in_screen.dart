@@ -31,16 +31,114 @@ class _SignInScreenState extends State<SignInScreen> {
       showAppMessage(context, 'Enter your email and password.');
       return;
     }
-    setState(() => busy = true);
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    final error = AccountStore.instance.signIn(email.text, password.text);
-    if (!mounted) return;
-    setState(() => busy = false);
-    if (error != null) {
-      showAppMessage(context, error);
+
+    final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
+    if (!emailRegex.hasMatch(email.text.trim())) {
+      showAppMessage(context, 'Enter a valid email address.');
       return;
     }
-    if (Navigator.canPop(context)) Navigator.pop(context);
+
+    if (password.text.length < 8) {
+      showAppMessage(context, 'Password must be at least 8 characters.');
+      return;
+    }
+
+    setState(() => busy = true);
+    final error = await AccountStore.instance.signIn(email.text.trim(), password.text);
+    if (!mounted) return;
+    setState(() => busy = false);
+
+    if (error != null) {
+      if (error == 'OTP_REQUIRED') {
+        // Send OTP before showing dialog
+        setState(() => busy = true);
+        final normalizedEmail = email.text.trim().toLowerCase();
+        final otpError = await AccountStore.instance.sendLoginOtp(normalizedEmail);
+        setState(() => busy = false);
+        
+        if (otpError != null) {
+          showAppMessage(context, otpError);
+          return;
+        }
+        
+        _showOtpDialog();
+      } else {
+        showAppMessage(context, error);
+      }
+      return;
+    }
+
+    Navigator.of(context).pushReplacementNamed('/hotel');
+  }
+
+  void _showOtpDialog() {
+    final otpController = TextEditingController();
+    bool otpBusy = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Enter Verification Code'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('We sent a 6-digit code to your email.'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: otpController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                decoration: const InputDecoration(
+                  labelText: 'Verification Code',
+                  hintText: '123456',
+                  counterText: '',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: otpBusy
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                    },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: otpBusy
+                  ? null
+                  : () async {
+                      if (otpController.text.length != 6) {
+                        showAppMessage(context, 'Enter a 6-digit code.');
+                        return;
+                      }
+
+                      setDialogState(() => otpBusy = true);
+                      final error = await AccountStore.instance.verifyLoginOtp(
+                        email.text.trim().toLowerCase(),
+                        otpController.text,
+                      );
+
+                      if (!mounted) return;
+                      setDialogState(() => otpBusy = false);
+
+                      if (error != null) {
+                        showAppMessage(context, error);
+                        return;
+                      }
+
+                      Navigator.pop(context);
+                      Navigator.of(context).pushReplacementNamed('/hotel');
+                    },
+              child: Text(otpBusy ? 'Verifying...' : 'Verify'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override

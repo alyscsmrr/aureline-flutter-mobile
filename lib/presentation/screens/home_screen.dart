@@ -1,16 +1,108 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_constants.dart';
 import '../../data/hotel_data.dart';
+import '../../data/room_inclusions.dart';
 import '../../theme/app_theme.dart';
+import '../../services/auth_service.dart';
+import '../../services/account_store.dart';
 import '../common/widgets.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  DateTime? checkIn;
+  DateTime? checkOut;
+  int guests = 2;
+  List<Map<String, dynamic>> availableRooms = [];
+  bool searching = false;
+  String? searchError;
+
+  @override
+  void initState() {
+    super.initState();
+    // Set default dates to today and tomorrow
+    final today = DateTime.now();
+    checkIn = today;
+    checkOut = today.add(const Duration(days: 1));
+  }
+
+  DateTime get today => DateTime.now();
+  DateTime get minCheckOut => checkIn != null ? checkIn!.add(const Duration(days: 1)) : today;
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return '';
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  bool get canSearch => checkIn != null && checkOut != null && checkOut!.isAfter(checkIn!);
+
+  Future<void> _searchRooms() async {
+    if (!canSearch) {
+      showAppMessage(context, 'Please select check-in and check-out dates first');
+      setState(() => searchError = 'Choose valid future dates with check-out after check-in.');
+      return;
+    }
+
+    setState(() => searching = true);
+    searchError = null;
+
+    try {
+      final rooms = await AuthService.searchRooms(
+        checkIn: _formatDate(checkIn),
+        checkOut: _formatDate(checkOut),
+        guests: guests,
+        token: AccountStore.instance.token,
+      );
+
+      if (rooms is List) {
+        final convertedRooms = rooms.map((room) {
+          if (room is Map<String, dynamic>) {
+            return room;
+          } else {
+            return Map<String, dynamic>.from(room as Map);
+          }
+        }).toList();
+        setState(() => availableRooms = convertedRooms);
+      } else {
+        setState(() => searchError = 'Invalid response from server');
+      }
+    } catch (e) {
+      setState(() => searchError = e.toString().replaceAll('Exception: ', ''));
+      showAppMessage(context, 'Search failed: ${e.toString().replaceAll('Exception: ', '')}');
+    } finally {
+      setState(() => searching = false);
+    }
+  }
+
+  void _selectRoom(Map<String, dynamic> room) {
+    if (AccountStore.instance.signedIn) {
+      // Navigate to guest booking with this room pre-selected
+      Navigator.pushNamed(
+        context,
+        '/guest-room-details',
+        arguments: {
+          'room': room,
+          'checkIn': _formatDate(checkIn),
+          'checkOut': _formatDate(checkOut),
+          'guests': guests,
+        },
+      );
+    } else {
+      Navigator.pushNamed(context, '/sign-in');
+    }
+  }
+
   @override
   Widget build(BuildContext context) => CustomScrollView(slivers: [
         const SliverToBoxAdapter(child: PublicHeader()),
         SliverToBoxAdapter(child: _hero(context)),
         SliverToBoxAdapter(child: _bookingBar(context)),
+        if (availableRooms.isNotEmpty || searchError != null) _RoomResults(),
         SliverToBoxAdapter(child: _intro()),
         SliverToBoxAdapter(child: _amenities()),
         SliverToBoxAdapter(child: _offers()),
@@ -81,37 +173,160 @@ class HomeScreen extends StatelessWidget {
                       color: ink, fontFamily: 'Georgia', fontSize: 24)),
               const SizedBox(height: 15),
               Row(children: [
-                Expanded(child: _dateField('Check-in', '10/11/2026')),
+                Expanded(child: _dateField('Check-in', checkIn, () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: today,
+                    firstDate: today,
+                    lastDate: today.add(const Duration(days: 365)),
+                  );
+                  if (picked != null) {
+                    setState(() {
+                      checkIn = picked;
+                      if (checkOut != null && checkOut!.isBefore(picked)) {
+                        checkOut = picked.add(const Duration(days: 1));
+                      }
+                    });
+                  }
+                })),
                 const SizedBox(width: 10),
-                Expanded(child: _dateField('Check-out', '10/13/2026'))
+                Expanded(child: _dateField('Check-out', checkOut, () async {
+                  if (checkIn == null) {
+                    showAppMessage(context, 'Select check-in date first');
+                    return;
+                  }
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: minCheckOut,
+                    firstDate: minCheckOut,
+                    lastDate: today.add(const Duration(days: 365)),
+                  );
+                  if (picked != null) {
+                    setState(() => checkOut = picked);
+                  }
+                }, enabled: checkIn != null))
               ]),
               const SizedBox(height: 12),
               Row(children: [
-                Expanded(child: _dateField('Guests', '2 guests')),
+                Expanded(child: _guestField()),
                 const SizedBox(width: 10),
                 FilledButton(
-                    onPressed: () =>
-                        showAppMessage(context, 'Finding your room...'),
+                    onPressed: searching ? null : _searchRooms,
                     style: FilledButton.styleFrom(
                         backgroundColor: forest,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
                             horizontal: 15, vertical: 15)),
-                    child: const Text('Find your room',
-                        style: TextStyle(fontSize: 10)))
+                    child: searching
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Text('Find your room',
+                            style: TextStyle(fontSize: 10)))
               ])
             ])),
       );
-  Widget _dateField(String label, String value) => Container(
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-      decoration: BoxDecoration(
+
+  Widget _dateField(String label, DateTime? date, VoidCallback onTap, {bool enabled = true}) => InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(3),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+          decoration: BoxDecoration(
+            border: Border.all(color: enabled ? border : muted.withOpacity(0.3)),
+            borderRadius: BorderRadius.circular(3),
+            color: enabled ? null : muted.withOpacity(0.1),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(color: sage, fontSize: 8)),
+            const SizedBox(height: 5),
+            Text(
+              date != null ? _formatDate(date) : 'Select date',
+              style: TextStyle(
+                color: enabled ? ink : muted,
+                fontSize: 11,
+              ),
+            ),
+          ]),
+        ),
+      );
+
+  Widget _guestField() => Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+        decoration: BoxDecoration(
           border: Border.all(color: border),
-          borderRadius: BorderRadius.circular(3)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: const TextStyle(color: sage, fontSize: 8)),
-        const SizedBox(height: 5),
-        Text(value, style: const TextStyle(color: ink, fontSize: 11))
-      ]));
+          borderRadius: BorderRadius.circular(3),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Guests', style: TextStyle(color: sage, fontSize: 8)),
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              IconButton(
+                onPressed: guests > 1 ? () => setState(() => guests--) : null,
+                icon: const Icon(Icons.remove, size: 16),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(24, 24),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('$guests', style: const TextStyle(color: ink, fontSize: 11)),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: guests < 10 ? () => setState(() => guests++) : null,
+                icon: const Icon(Icons.add, size: 16),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(24, 24),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ],
+          ),
+        ]),
+      );
+
+  Widget _RoomResults() => SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(25, 40, 25, 40),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('AVAILABLE ROOMS', style: eyebrowStyle),
+            const SizedBox(height: 18),
+            const Text('Your perfect match.', style: sectionStyle),
+            const SizedBox(height: 20),
+            if (searchError != null)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFEF4444)),
+                ),
+                child: Text(
+                  searchError!,
+                  style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 12),
+                ),
+              )
+            else
+              ...availableRooms.map((room) => Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _AvailableRoomCard(
+                  room: room,
+                  onTap: () => _selectRoom(room),
+                ),
+              )),
+          ]),
+        ),
+      );
   Widget _intro() => const Padding(
       padding: EdgeInsets.fromLTRB(25, 70, 25, 58),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -238,7 +453,7 @@ class HomeScreen extends StatelessWidget {
             textAlign: TextAlign.center, style: sectionStyle),
         const SizedBox(height: 24),
         FilledButton(
-            onPressed: () => showAppMessage(context, 'Plan your stay.'),
+            onPressed: () => Navigator.pushNamed(context, '/sign-in'),
             style: FilledButton.styleFrom(
                 backgroundColor: forest, foregroundColor: Colors.white),
             child: const Text('Plan your stay'))
@@ -318,6 +533,118 @@ class PublicRoomCard extends StatelessWidget {
                   style: const TextStyle(color: muted, fontSize: 10))
             ]))
       ]));
+}
+
+class _AvailableRoomCard extends StatelessWidget {
+  final Map<String, dynamic> room;
+  final VoidCallback onTap;
+  const _AvailableRoomCard({required this.room, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final roomType = room['type'] as String? ?? 'Double';
+    final inclusions = roomInclusions[roomType] ?? [];
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(7),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: border),
+          borderRadius: BorderRadius.circular(7),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(
+            height: 200,
+            width: double.infinity,
+            child: Image.network(
+              room['image'] as String? ?? '',
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  height: 200,
+                  color: paleGreen,
+                  child: const Icon(Icons.bed, size: 48, color: muted),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                roomType,
+                style: const TextStyle(
+                  color: ink,
+                  fontFamily: 'Georgia',
+                  fontSize: 20,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.people, size: 14, color: sage),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${room['capacity'] as int? ?? 1} guest${(room['capacity'] as int? ?? 1) > 1 ? 's' : ''}',
+                    style: const TextStyle(fontSize: 12, color: muted),
+                  ),
+                  const SizedBox(width: 12),
+                  Icon(Icons.bed, size: 14, color: sage),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'King bed',
+                    style: TextStyle(fontSize: 12, color: muted),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '₱${(room['price'] as num?)?.toStringAsFixed(2) ?? '0.00'} / night',
+                    style: const TextStyle(
+                      color: forest,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const Icon(Icons.arrow_forward, size: 16, color: forest),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Text('Room amenities', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ink)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: inclusions.take(3).map((inclusion) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle, size: 12, color: forest),
+                    const SizedBox(width: 4),
+                    Text(
+                      inclusion,
+                      style: const TextStyle(fontSize: 10, color: muted),
+                    ),
+                  ],
+                )).toList(),
+              ),
+              if (inclusions.length > 3)
+                Text(
+                  '+${inclusions.length - 3} more',
+                  style: const TextStyle(fontSize: 10, color: forest),
+                ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 class ExperienceTile extends StatelessWidget {

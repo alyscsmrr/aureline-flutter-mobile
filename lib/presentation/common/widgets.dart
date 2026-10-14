@@ -102,35 +102,12 @@ class PublicHeader extends StatelessWidget {
                       fontSize: 8,
                       letterSpacing: .4))),
         ),
-        LayoutBuilder(builder: (context, constraints) {
-          final compact = constraints.maxWidth <= 600;
-          return Container(
-              decoration: const BoxDecoration(
-                  color: Color(0xFFFFFEFB),
-                  border: Border(bottom: BorderSide(color: border))),
-              padding: EdgeInsets.fromLTRB(compact ? 18 : 22, 16, compact ? 14 : 18, 16),
-              child: Row(children: [
-                const Brand(),
-                const Spacer(),
-                IconButton(
-                    tooltip: 'Sign in',
-                    onPressed: () => Navigator.pushNamed(context, '/sign-in'),
-                    icon: const Icon(Icons.person_outline, color: forest)),
-                if (!compact)
-                  FilledButton(
-                      onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/hotel', (route) => false),
-                      style: FilledButton.styleFrom(
-                          backgroundColor: forest,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10)),
-                      child: const Text('Book your stay', style: TextStyle(fontSize: 10))),
-                if (compact)
-                  IconButton(
-                      tooltip: 'Menu',
-                      onPressed: () => showAppMessage(context, 'Use the sections below to explore Aureline.'),
-                      icon: const Icon(Icons.menu, color: forest))
-              ]));
-        }),
+        Container(
+            decoration: const BoxDecoration(
+                color: Color(0xFFFFFEFB),
+                border: Border(bottom: BorderSide(color: border))),
+            padding: const EdgeInsets.fromLTRB(22, 16, 22, 16),
+            child: const Brand()),
       ]);
 }
 

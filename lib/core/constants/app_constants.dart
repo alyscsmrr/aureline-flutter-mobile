@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 const forest = Color(0xFF244A3D);
 const deepForest = Color(0xFF203D32);
@@ -17,3 +18,7 @@ const roomImages = [
   'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=1000&q=85',
   'https://images.unsplash.com/photo-1591088398332-8a7791972843?auto=format&fit=crop&w=1000&q=85',
 ];
+
+class AppConfig {
+  static String get apiBaseUrl => dotenv.env['API_BASE_URL'] ?? 'http://localhost:5000';
+}
