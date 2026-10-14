@@ -37,7 +37,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool showCurrentPassword = false;
   bool showNewPassword = false;
   bool showConfirmPassword = false;
-  bool showTwoFAPassword = false;
+  bool obscureTwoFAPassword = true;
   bool? _pendingTwoFAValue; // tracks whether we're enabling or disabling
 
   @override
@@ -503,9 +503,93 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
+  void _showOtpDialog({
+    required String email,
+    required String purpose,
+    required Function(String) onVerified,
+  }) {
+    final otpController = TextEditingController();
+    bool otpBusy = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Enter Verification Code'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('We sent a 6-digit code to $email.'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: otpController,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                decoration: const InputDecoration(
+                  labelText: 'Verification Code',
+                  hintText: '123456',
+                  counterText: '',
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: otpBusy
+                  ? null
+                  : () {
+                      Navigator.pop(context);
+                      // Reset state if cancelled
+                      setState(() {
+                        toggling2FA = false;
+                        changingPassword = false;
+                        _pendingTwoFAValue = null;
+                      });
+                    },
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: otpBusy
+                  ? null
+                  : () async {
+                      if (otpController.text.length != 6) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Enter a 6-digit code')),
+                        );
+                        return;
+                      }
+
+                      setDialogState(() => otpBusy = true);
+                      final error = await AccountStore.instance.verifyOtp(
+                        email.trim().toLowerCase(),
+                        otpController.text,
+                      );
+
+                      if (!mounted) return;
+                      setDialogState(() => otpBusy = false);
+
+                      if (error != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error)),
+                        );
+                        return;
+                      }
+
+                      Navigator.pop(context);
+                      onVerified(otpController.text);
+                    },
+              child: Text(otpBusy ? 'Verifying...' : 'Verify'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleTwoFactor(bool enable) async {
     final password = twoFAPasswordController.text;
-    
+
     if (password.isEmpty) {
       setState(() => twoFAPasswordError = 'Please enter your current password');
       return;
@@ -522,36 +606,58 @@ class _AccountScreenState extends State<AccountScreen> {
         throw Exception('You must be logged in');
       }
 
-      // Always verify password before changing 2FA state
+      // Verify password before changing 2FA state
       await AuthService.verifyPassword(
         currentPassword: password,
         token: token,
       );
 
-      // Update 2FA setting
-      await AuthService.updateProfile(
-        token: token,
-        data: {'twoFactorEnabled': enable},
-      );
+      // Send OTP and show verification dialog
+      final email = AccountStore.instance.email;
+      if (email == null) {
+        throw Exception('Email not found');
+      }
 
+      final error = await AccountStore.instance.sendOtp(email, enable ? 'Enable 2FA' : 'Disable 2FA');
+      if (error != null) {
+        throw Exception(error);
+      }
+
+      // Show OTP dialog
       if (mounted) {
-        setState(() {
-          twoFactorEnabled = enable;
-          showTwoFAPassword = false;
-          _pendingTwoFAValue = null;
-          twoFAPasswordController.clear();
-        });
-        showAppMessage(
-          context,
-          enable ? 'Two-factor authentication enabled' : 'Two-factor authentication disabled',
+        _showOtpDialog(
+          email: email,
+          purpose: enable ? 'Enable 2FA' : 'Disable 2FA',
+          onVerified: (otp) async {
+            try {
+              // Update 2FA setting
+              await AuthService.updateProfile(
+                token: token,
+                data: {'twoFactorEnabled': enable},
+              );
+
+              if (mounted) {
+                setState(() {
+                  twoFactorEnabled = enable;
+                  _pendingTwoFAValue = null;
+                  twoFAPasswordController.clear();
+                });
+                showAppMessage(
+                  context,
+                  enable ? 'Two-factor authentication enabled' : 'Two-factor authentication disabled',
+                );
+              }
+            } catch (e) {
+              if (mounted) {
+                setState(() => twoFAPasswordError = e.toString().replaceAll('Exception: ', ''));
+              }
+            }
+          },
         );
       }
     } catch (e) {
       if (mounted) {
         setState(() => twoFAPasswordError = e.toString().replaceAll('Exception: ', ''));
-      }
-    } finally {
-      if (mounted) {
         setState(() => toggling2FA = false);
       }
     }
@@ -654,7 +760,7 @@ class _AccountScreenState extends State<AccountScreen> {
               value: twoFactorEnabled,
               onChanged: (value) {
                 setState(() {
-                  showTwoFAPassword = true;
+                  obscureTwoFAPassword = true;
                   _pendingTwoFAValue = value;
                   twoFAPasswordError = '';
                   twoFAPasswordController.clear();
@@ -664,14 +770,14 @@ class _AccountScreenState extends State<AccountScreen> {
             ),
           ],
         ),
-        if (showTwoFAPassword) ...[
+        if (_pendingTwoFAValue != null) ...[
           const SizedBox(height: 16),
           _PasswordField(
             label: 'Current password (required to enable 2FA)',
             controller: twoFAPasswordController,
-            obscure: !showTwoFAPassword,
-            showPassword: showTwoFAPassword,
-            onToggle: () => setState(() => showTwoFAPassword = !showTwoFAPassword),
+            obscure: obscureTwoFAPassword,
+            showPassword: !obscureTwoFAPassword,
+            onToggle: () => setState(() => obscureTwoFAPassword = !obscureTwoFAPassword),
             onChanged: (value) => setState(() {}),
           ),
           if (twoFAPasswordError.isNotEmpty)
@@ -687,7 +793,7 @@ class _AccountScreenState extends State<AccountScreen> {
               Expanded(
                 child: OutlinedButton(
                   onPressed: () => setState(() {
-                    showTwoFAPassword = false;
+                    _pendingTwoFAValue = null;
                     twoFAPasswordController.clear();
                     twoFAPasswordError = '';
                   }),
@@ -817,33 +923,57 @@ class _AccountScreenState extends State<AccountScreen> {
         token: token,
       );
 
-      // Change password
-      await AuthService.changePassword(
-        currentPassword: currentPassword,
-        newPassword: newPassword,
-        token: token,
-      );
+      // Send OTP and show verification dialog
+      final email = AccountStore.instance.email;
+      if (email == null) {
+        throw Exception('Email not found');
+      }
 
+      final error = await AccountStore.instance.sendOtp(email, 'Password Change');
+      if (error != null) {
+        throw Exception(error);
+      }
+
+      // Show OTP dialog
       if (mounted) {
-        showAppMessage(context, 'Password updated successfully. Please sign in again.');
-        
-        // Clear password fields
-        currentPasswordController.clear();
-        newPasswordController.clear();
-        confirmPasswordController.clear();
+        _showOtpDialog(
+          email: email,
+          purpose: 'Password Change',
+          onVerified: (otp) async {
+            try {
+              // Change password
+              await AuthService.changePassword(
+                currentPassword: currentPassword,
+                newPassword: newPassword,
+                token: token,
+              );
 
-        // Sign out and navigate to home
-        await AccountStore.instance.signOut();
-        if (mounted) {
-          Navigator.of(context).pushReplacementNamed('/hotel');
-        }
+              if (mounted) {
+                showAppMessage(context, 'Password updated successfully. Please sign in again.');
+
+                // Clear password fields
+                currentPasswordController.clear();
+                newPasswordController.clear();
+                confirmPasswordController.clear();
+
+                // Sign out and navigate to home
+                await AccountStore.instance.signOut();
+                if (mounted) {
+                  Navigator.of(context).pushReplacementNamed('/hotel');
+                }
+              }
+            } catch (e) {
+              if (mounted) {
+                setState(() => passwordError = e.toString().replaceAll('Exception: ', ''));
+                setState(() => changingPassword = false);
+              }
+            }
+          },
+        );
       }
     } catch (e) {
       if (mounted) {
         setState(() => passwordError = e.toString().replaceAll('Exception: ', ''));
-      }
-    } finally {
-      if (mounted) {
         setState(() => changingPassword = false);
       }
     }

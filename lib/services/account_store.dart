@@ -182,6 +182,24 @@ class AccountStore extends ChangeNotifier {
     }
   }
 
+  Future<String?> sendOtp(String email, String purpose) async {
+    try {
+      await AuthService.sendOtp(email, purpose);
+      return null;
+    } catch (e) {
+      return e.toString().replaceAll('Exception: ', '');
+    }
+  }
+
+  Future<String?> verifyOtp(String email, String otp) async {
+    try {
+      await AuthService.verifyOtp(email, otp);
+      return null;
+    } catch (e) {
+      return e.toString().replaceAll('Exception: ', '');
+    }
+  }
+
   Future<String?> createAccount(
     String firstName,
     String lastName,
