@@ -10,6 +10,7 @@ class AccountStore extends ChangeNotifier {
   String? name;
   String? token;
   String? guestId;
+  String? _pendingRegistrationToken;
 
   bool get signedIn => email != null && token != null;
 
@@ -172,7 +173,8 @@ class AccountStore extends ChangeNotifier {
     try {
       final response = await AuthService.verifyOtp(email, otp);
       if (response.containsKey('registrationToken')) {
-        return response['registrationToken'] as String;
+        _pendingRegistrationToken = response['registrationToken'] as String;
+        return null; // null = success
       }
       return 'OTP verification failed';
     } catch (e) {
@@ -191,6 +193,7 @@ class AccountStore extends ChangeNotifier {
     String passport,
   ) async {
     final normalized = value.trim().toLowerCase();
+    final regToken = registrationToken.isNotEmpty ? registrationToken : (_pendingRegistrationToken ?? '');
     try {
       final response = await AuthService.register(
         {
@@ -202,7 +205,7 @@ class AccountStore extends ChangeNotifier {
           'passport': passport,
         },
         password,
-        registrationToken,
+        regToken,
       );
 
       final user = response['user'] as Map<String, dynamic>;
@@ -210,15 +213,21 @@ class AccountStore extends ChangeNotifier {
       name = user['name'] as String;
       token = response['token'] as String;
       guestId = user['guestId'] as String?;
+      _pendingRegistrationToken = null;
 
       await _saveToStorage();
       notifyListeners();
       return null;
     } catch (e) {
+      _pendingRegistrationToken = null;
       final errorMessage = e.toString().replaceAll('Exception: ', '');
       // Check if it's an email already taken error
-      if (errorMessage.contains('already') || errorMessage.contains('exists') || errorMessage.contains('taken')) {
+      if (errorMessage.contains('already registered') && errorMessage.contains('Email')) {
         return 'Email address already taken';
+      }
+      // Check if it's a phone number already taken error
+      if (errorMessage.contains('already registered') && errorMessage.contains('Phone')) {
+        return 'Phone number already taken';
       }
       return errorMessage;
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_constants.dart';
 import '../../theme/app_theme.dart';
@@ -172,22 +173,42 @@ class _AccountScreenState extends State<AccountScreen> {
                   _EditTextField(
                     label: 'First Name',
                     controller: firstNameController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s\-']")),
+                      LengthLimitingTextInputFormatter(50),
+                    ],
                   ),
                   _EditTextField(
                     label: 'Last Name',
                     controller: lastNameController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s\-']")),
+                      LengthLimitingTextInputFormatter(50),
+                    ],
                   ),
                   _EditTextField(
                     label: 'Phone',
                     controller: phoneController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r"[0-9]")),
+                      LengthLimitingTextInputFormatter(11),
+                    ],
                   ),
                   _EditTextField(
                     label: 'Address',
                     controller: addressController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z0-9\s#\-']")),
+                      LengthLimitingTextInputFormatter(200),
+                    ],
                   ),
                   _EditTextField(
                     label: 'ID / Passport',
                     controller: passportController,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z0-9\-]")),
+                      LengthLimitingTextInputFormatter(20),
+                    ],
                   ),
                   if (profileError.isNotEmpty)
                     Padding(
@@ -396,6 +417,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Widget _EditTextField({
     required String label,
     required TextEditingController controller,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -413,6 +435,7 @@ class _AccountScreenState extends State<AccountScreen> {
           const SizedBox(height: 4),
           TextField(
             controller: controller,
+            inputFormatters: inputFormatters,
             decoration: InputDecoration(
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),

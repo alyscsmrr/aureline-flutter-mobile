@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_constants.dart';
 import '../../theme/app_theme.dart';
 import '../../services/account_store.dart';
+import '../../services/auth_service.dart';
 import '../common/widgets.dart';
 
 class SignUpScreen extends StatefulWidget {
@@ -23,7 +26,27 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool busy = false;
   bool obscurePassword = true;
   bool obscureConfirm = true;
-  String? registrationToken;
+
+  // Async duplicate-check state
+  String? _emailServerError;
+  bool _emailChecking = false;
+  String? _phoneServerError;
+  bool _phoneChecking = false;
+  String? _passportServerError;
+  bool _passportChecking = false;
+  Timer? _emailDebounce;
+  Timer? _phoneDebounce;
+  Timer? _passportDebounce;
+
+  // Field touched state for validation
+  bool _firstTouched = false;
+  bool _lastTouched = false;
+  bool _emailTouched = false;
+  bool _phoneTouched = false;
+  bool _addressTouched = false;
+  bool _passportTouched = false;
+  bool _passwordTouched = false;
+  bool _confirmPasswordTouched = false;
 
   @override
   void dispose() {
@@ -35,38 +58,46 @@ class _SignUpScreenState extends State<SignUpScreen> {
     passport.dispose();
     password.dispose();
     confirmPassword.dispose();
+    _emailDebounce?.cancel();
+    _phoneDebounce?.cancel();
+    _passportDebounce?.cancel();
     super.dispose();
   }
 
   String? validateFirstName(String value) {
-    if (value.isEmpty) return null;
+    if (!_firstTouched) return null;
+    if (value.isEmpty) return 'First name is required';
     if (value.length < 2) return 'Minimum 2 characters';
     if (!RegExp(r"^[a-zA-Z\s\-']+$").hasMatch(value)) return 'Only letters, spaces, hyphens, and apostrophes';
     return null;
   }
 
   String? validateLastName(String value) {
-    if (value.isEmpty) return null;
+    if (!_lastTouched) return null;
+    if (value.isEmpty) return 'Last name is required';
     if (value.length < 2) return 'Minimum 2 characters';
     if (!RegExp(r"^[a-zA-Z\s\-']+$").hasMatch(value)) return 'Only letters, spaces, hyphens, and apostrophes';
     return null;
   }
 
   String? validateEmail(String value) {
-    if (value.isEmpty) return null;
+    if (!_emailTouched) return null;
+    if (value.isEmpty) return 'Email address is required';
     if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value)) return 'Invalid email format';
     if (value.length < 5) return 'Minimum 5 characters';
     return null;
   }
 
   String? validatePassword(String value) {
-    if (value.isEmpty) return null;
+    if (!_passwordTouched) return null;
+    if (value.isEmpty) return 'Password is required';
     if (value.length < 8) return 'Minimum 8 characters';
     return null;
   }
 
   String? validatePhone(String value) {
-    if (value.isEmpty) return null;
+    if (!_phoneTouched) return null;
+    if (value.isEmpty) return 'Phone number is required';
     final digits = value.replaceAll(RegExp(r'\D'), '');
     final phoneDigits = digits.startsWith('639') ? digits.substring(3) : digits;
     if (phoneDigits.length != 9) return 'Phone number must contain exactly 9 digits';
@@ -74,7 +105,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   String? validateAddress(String value) {
-    if (value.isEmpty) return null;
+    if (!_addressTouched) return null;
+    if (value.isEmpty) return 'Address is required';
     if (value.length < 10) return 'Minimum 10 characters';
     if (value.length > 200) return 'Maximum 200 characters';
     if (!RegExp(r"^[a-zA-Z0-9\s#\-']+$").hasMatch(value)) return 'Only letters, numbers, spaces, #, -, and apostrophes';
@@ -82,11 +114,92 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   String? validatePassport(String value) {
-    if (value.isEmpty) return null;
+    if (!_passportTouched) return null;
+    if (value.isEmpty) return 'ID/passport number is required';
     if (value.length < 5) return 'Minimum 5 characters';
     if (value.length > 20) return 'Maximum 20 characters';
-    if (!RegExp(r"^[a-zA-Z0-9]+$").hasMatch(value)) return 'Only letters and numbers';
+    if (!RegExp(r"^[a-zA-Z0-9\-]+$").hasMatch(value)) return 'Only letters, numbers, and hyphens';
     return null;
+  }
+
+  void _onEmailChanged(String value) {
+    // Clear server error immediately on change
+    if (_emailServerError != null) setState(() => _emailServerError = null);
+
+    _emailDebounce?.cancel();
+    // Only fire the check once the field looks like a valid email
+    if (validateEmail(value) != null || value.isEmpty) return;
+
+    setState(() => _emailChecking = true);
+    _emailDebounce = Timer(const Duration(milliseconds: 600), () async {
+      try {
+        final available = await AuthService.checkEmailAvailable(value.trim().toLowerCase());
+        if (!mounted) return;
+        setState(() {
+          _emailServerError = available ? null : 'Email address already taken';
+          _emailChecking = false;
+        });
+      } catch (_) {
+        if (mounted) setState(() => _emailChecking = false);
+      }
+    });
+  }
+
+  void _onPhoneChanged(String value) {
+    // Clear server error immediately on change
+    if (_phoneServerError != null) setState(() => _phoneServerError = null);
+
+    _phoneDebounce?.cancel();
+    // Only fire the check once the field looks like a valid phone
+    if (validatePhone(value) != null || value.isEmpty) return;
+
+    setState(() => _phoneChecking = true);
+    _phoneDebounce = Timer(const Duration(milliseconds: 600), () async {
+      try {
+        final available = await AuthService.checkPhoneAvailable(value.trim());
+        if (!mounted) return;
+        setState(() {
+          _phoneServerError = available ? null : 'Phone number already taken';
+          _phoneChecking = false;
+        });
+      } catch (_) {
+        if (mounted) setState(() => _phoneChecking = false);
+      }
+    });
+  }
+
+  void _onPhoneTextChanged(String value) {
+    // Handle phone number formatting - only allow digits after prefix
+    if (value.isEmpty || value == '+63 9' || value == '+63') {
+      phone.text = '+63 9';
+    } else {
+      final digits = value.replaceAll(RegExp(r'\D'), '');
+      final phoneDigits = digits.startsWith('639') ? digits.substring(3) : digits;
+      phone.text = '+63 9' + phoneDigits.substring(0, phoneDigits.length > 9 ? 9 : phoneDigits.length);
+    }
+    phone.selection = TextSelection.fromPosition(TextPosition(offset: phone.text.length));
+    _onPhoneChanged(phone.text);
+  }
+
+  void _onPassportChanged(String value) {
+    if (_passportServerError != null) setState(() => _passportServerError = null);
+
+    _passportDebounce?.cancel();
+    if (validatePassport(value) != null || value.isEmpty) return;
+
+    setState(() => _passportChecking = true);
+    _passportDebounce = Timer(const Duration(milliseconds: 600), () async {
+      try {
+        final available = await AuthService.checkPassportAvailable(value.trim());
+        if (!mounted) return;
+        setState(() {
+          _passportServerError = available ? null : 'ID/passport number already registered';
+          _passportChecking = false;
+        });
+      } catch (_) {
+        if (mounted) setState(() => _passportChecking = false);
+      }
+    });
   }
 
   int _calculatePasswordStrength(String password) {
@@ -124,6 +237,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> submit() async {
+    // Mark all fields as touched for validation
+    setState(() {
+      _firstTouched = true;
+      _lastTouched = true;
+      _emailTouched = true;
+      _phoneTouched = true;
+      _addressTouched = true;
+      _passportTouched = true;
+      _passwordTouched = true;
+      _confirmPasswordTouched = true;
+    });
+
     final firstNameError = validateFirstName(first.text);
     final lastNameError = validateLastName(last.text);
     final emailError = validateEmail(email.text);
@@ -132,13 +257,41 @@ class _SignUpScreenState extends State<SignUpScreen> {
     final passportError = validatePassport(passport.text);
     final passwordError = validatePassword(password.text);
 
-    if (firstNameError != null || lastNameError != null || emailError != null || 
+    if (firstNameError != null || lastNameError != null || emailError != null ||
         phoneError != null || addressError != null || passportError != null || passwordError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(
-          firstNameError ?? lastNameError ?? emailError ?? phoneError ?? 
+          firstNameError ?? lastNameError ?? emailError ?? phoneError ??
           addressError ?? passportError ?? passwordError!
         )),
+      );
+      return;
+    }
+
+    if (_emailServerError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_emailServerError!)),
+      );
+      return;
+    }
+
+    if (_phoneServerError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_phoneServerError!)),
+      );
+      return;
+    }
+
+    if (_passportServerError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_passportServerError!)),
+      );
+      return;
+    }
+
+    if (_emailChecking || _phoneChecking || _passportChecking) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please wait while we verify your details...')),
       );
       return;
     }
@@ -226,7 +379,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         return;
                       }
 
-                      registrationToken = error;
                       Navigator.pop(context);
                       _completeRegistration();
                     },
@@ -245,7 +397,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       last.text,
       email.text,
       password.text,
-      registrationToken!,
+      '', // token is held internally by AccountStore after OTP verification
       phone.text,
       address.text,
       passport.text,
@@ -280,10 +432,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
             child: TextField(
               controller: first,
               textInputAction: TextInputAction.next,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s\-']")),
+                LengthLimitingTextInputFormatter(50),
+              ],
               decoration: InputDecoration(
                 labelText: 'First name',
                 errorText: validateFirstName(first.text),
               ),
+              onTapOutside: (_) {
+                if (!_firstTouched) {
+                  setState(() => _firstTouched = true);
+                }
+              },
+              onChanged: (_) => setState(() {}),
             ),
           ),
           const SizedBox(width: 12),
@@ -291,10 +453,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
             child: TextField(
               controller: last,
               textInputAction: TextInputAction.next,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s\-']")),
+                LengthLimitingTextInputFormatter(50),
+              ],
               decoration: InputDecoration(
                 labelText: 'Last name',
                 errorText: validateLastName(last.text),
               ),
+              onTapOutside: (_) {
+                if (!_lastTouched) {
+                  setState(() => _lastTouched = true);
+                }
+              },
+              onChanged: (_) => setState(() {}),
             ),
           ),
         ]),
@@ -303,11 +475,34 @@ class _SignUpScreenState extends State<SignUpScreen> {
           controller: email,
           keyboardType: TextInputType.emailAddress,
           textInputAction: TextInputAction.next,
+          inputFormatters: [
+            FilteringTextInputFormatter.deny(RegExp(r'\s')),
+            LengthLimitingTextInputFormatter(254),
+          ],
           decoration: InputDecoration(
             labelText: 'Email address',
             hintText: 'you@example.com',
-            errorText: validateEmail(email.text),
+            errorText: validateEmail(email.text) ?? _emailServerError,
+            suffixIcon: _emailChecking
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : null,
           ),
+          onTapOutside: (_) {
+            if (!_emailTouched) {
+              setState(() => _emailTouched = true);
+            }
+          },
+          onChanged: (value) {
+            setState(() {});
+            _onEmailChanged(value);
+          },
         ),
         const SizedBox(height: 16),
         TextField(
@@ -317,39 +512,77 @@ class _SignUpScreenState extends State<SignUpScreen> {
           decoration: InputDecoration(
             labelText: 'Phone number',
             hintText: '+63 9',
-            errorText: validatePhone(phone.text),
+            errorText: validatePhone(phone.text) ?? _phoneServerError,
+            suffixIcon: _phoneChecking
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : null,
           ),
-          onChanged: (value) {
-            // Handle phone number formatting
-            if (value.isEmpty || value == '+63 9' || value == '+63') {
-              phone.text = '+63 9';
-            } else {
-              final digits = value.replaceAll(RegExp(r'\D'), '');
-              final phoneDigits = digits.startsWith('639') ? digits.substring(3) : digits;
-              phone.text = '+63 9' + phoneDigits.substring(0, phoneDigits.length > 9 ? 9 : phoneDigits.length);
+          onTapOutside: (_) {
+            if (!_phoneTouched) {
+              setState(() => _phoneTouched = true);
             }
-            phone.selection = TextSelection.fromPosition(TextPosition(offset: phone.text.length));
           },
+          onChanged: _onPhoneTextChanged,
         ),
         const SizedBox(height: 16),
         TextField(
           controller: address,
           textInputAction: TextInputAction.next,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z0-9\s#\-']")),
+            LengthLimitingTextInputFormatter(200),
+          ],
           decoration: InputDecoration(
             labelText: 'Address',
             hintText: 'Street address',
             errorText: validateAddress(address.text),
           ),
+          onTapOutside: (_) {
+            if (!_addressTouched) {
+              setState(() => _addressTouched = true);
+            }
+          },
+          onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 16),
         TextField(
           controller: passport,
           textInputAction: TextInputAction.next,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z0-9\-]")),
+            LengthLimitingTextInputFormatter(20),
+          ],
           decoration: InputDecoration(
             labelText: 'ID / passport number',
             hintText: 'Example: P1234567 or UMID number',
-            errorText: validatePassport(passport.text),
+            errorText: validatePassport(passport.text) ?? _passportServerError,
+            suffixIcon: _passportChecking
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : null,
           ),
+          onTapOutside: (_) {
+            if (!_passportTouched) {
+              setState(() => _passportTouched = true);
+            }
+          },
+          onChanged: (value) {
+            setState(() {});
+            _onPassportChanged(value);
+          },
         ),
         const SizedBox(height: 16),
         TextField(
@@ -365,6 +598,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
               onPressed: () => setState(() => obscurePassword = !obscurePassword),
             ),
           ),
+          onTapOutside: (_) {
+            if (!_passwordTouched) {
+              setState(() => _passwordTouched = true);
+            }
+          },
           onChanged: (value) {
             setState(() {}); // Trigger rebuild to update strength indicator
           },
@@ -407,6 +645,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
               onPressed: () => setState(() => obscureConfirm = !obscureConfirm),
             ),
           ),
+          onTapOutside: (_) {
+            if (!_confirmPasswordTouched) {
+              setState(() => _confirmPasswordTouched = true);
+            }
+          },
+          onChanged: (_) => setState(() {}),
         ),
         const SizedBox(height: 25),
         SizedBox(

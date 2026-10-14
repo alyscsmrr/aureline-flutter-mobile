@@ -27,17 +27,9 @@ class _ManagementShellState extends State<ManagementShell> {
   @override
   void didUpdateWidget(ManagementShell oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Reset index if it's out of bounds after pages change
     if (selectedIndex >= pages.length) {
       setState(() => selectedIndex = 0);
     }
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Reset to index 0 when auth state changes
-    setState(() => selectedIndex = 0);
   }
 
   List<Widget> get pages {
@@ -77,25 +69,35 @@ class _ManagementShellState extends State<ManagementShell> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: AccountStore.instance,
-        builder: (context, _) => Scaffold(
-          backgroundColor: cream,
-          body: SafeArea(child: IndexedStack(index: selectedIndex, children: pages)),
-          bottomNavigationBar: Container(
-            decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: border))),
-            padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
-            child: Row(children: [
-              for (int i = 0; i < navItems.length; i++)
-                _NavItem(
-                  icon: navItems[i].icon,
-                  selectedIcon: navItems[i].selectedIcon,
-                  label: navItems[i].label,
-                  index: i,
-                  active: selectedIndex == i,
-                  onTap: (idx) => setState(() => selectedIndex = idx),
-                ),
-            ]),
-          ),
-        ),
+        builder: (context, _) {
+          final currentPages = pages;
+          final safeIndex = selectedIndex.clamp(0, currentPages.length - 1);
+          if (safeIndex != selectedIndex) {
+            // Schedule the state update after the current build
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => selectedIndex = safeIndex);
+            });
+          }
+          return Scaffold(
+            backgroundColor: cream,
+            body: SafeArea(child: IndexedStack(index: safeIndex, children: currentPages)),
+            bottomNavigationBar: Container(
+              decoration: const BoxDecoration(color: Colors.white, border: Border(top: BorderSide(color: border))),
+              padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
+              child: Row(children: [
+                for (int i = 0; i < navItems.length; i++)
+                  _NavItem(
+                    icon: navItems[i].icon,
+                    selectedIcon: navItems[i].selectedIcon,
+                    label: navItems[i].label,
+                    index: i,
+                    active: safeIndex == i,
+                    onTap: (idx) => setState(() => selectedIndex = idx),
+                  ),
+              ]),
+            ),
+          );
+        },
       );
 }
 

@@ -51,6 +51,22 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>> getWithQuery(
+    String endpoint,
+    Map<String, String> queryParams, {
+    String? token,
+  }) async {
+    final uri = Uri.parse('$baseUrl$endpoint').replace(queryParameters: queryParams);
+    final response = await http.get(uri, headers: _headers(token: token));
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    } else {
+      final errorBody = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(errorBody['error'] ?? 'Request failed');
+    }
+  }
+
   static Future<dynamic> getDynamic(
     String endpoint, {
     String? token,

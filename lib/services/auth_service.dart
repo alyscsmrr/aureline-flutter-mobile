@@ -29,6 +29,30 @@ class AuthService {
     );
   }
 
+  static Future<bool> checkEmailAvailable(String email) async {
+    final response = await ApiService.getWithQuery(
+      '/api/auth/check-email',
+      {'email': email},
+    );
+    return response['available'] == true;
+  }
+
+  static Future<bool> checkPhoneAvailable(String phone) async {
+    final response = await ApiService.getWithQuery(
+      '/api/auth/check-phone',
+      {'phone': phone},
+    );
+    return response['available'] == true;
+  }
+
+  static Future<bool> checkPassportAvailable(String passport) async {
+    final response = await ApiService.getWithQuery(
+      '/api/auth/check-passport',
+      {'passport': passport},
+    );
+    return response['available'] == true;
+  }
+
   static Future<void> sendOtp(String email, String purpose) async {
     await ApiService.post(
       '/api/otp/send',
