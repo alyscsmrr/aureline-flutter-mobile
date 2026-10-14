@@ -38,6 +38,7 @@ class _AccountScreenState extends State<AccountScreen> {
   bool showNewPassword = false;
   bool showConfirmPassword = false;
   bool showTwoFAPassword = false;
+  bool? _pendingTwoFAValue; // tracks whether we're enabling or disabling
 
   @override
   void dispose() {
@@ -63,11 +64,13 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   Future<void> _loadProfile() async {
+    if (!mounted) return;
     setState(() => loading = true);
     try {
       final token = AccountStore.instance.token;
       if (token != null) {
         final data = await AuthService.getProfile(token);
+        if (!mounted) return;
         setState(() {
           profile = data;
           twoFactorEnabled = data['twoFactorEnabled'] as bool? ?? false;
@@ -80,9 +83,9 @@ class _AccountScreenState extends State<AccountScreen> {
         });
       }
     } catch (e) {
-      showAppMessage(context, 'Failed to load profile: $e');
+      if (mounted) showAppMessage(context, 'Failed to load profile: $e');
     } finally {
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     }
   }
 
@@ -503,7 +506,7 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _toggleTwoFactor(bool enable) async {
     final password = twoFAPasswordController.text;
     
-    if (enable && password.isEmpty) {
+    if (password.isEmpty) {
       setState(() => twoFAPasswordError = 'Please enter your current password');
       return;
     }
@@ -519,7 +522,7 @@ class _AccountScreenState extends State<AccountScreen> {
         throw Exception('You must be logged in');
       }
 
-      // Verify current password
+      // Always verify password before changing 2FA state
       await AuthService.verifyPassword(
         currentPassword: password,
         token: token,
@@ -535,6 +538,7 @@ class _AccountScreenState extends State<AccountScreen> {
         setState(() {
           twoFactorEnabled = enable;
           showTwoFAPassword = false;
+          _pendingTwoFAValue = null;
           twoFAPasswordController.clear();
         });
         showAppMessage(
@@ -649,14 +653,12 @@ class _AccountScreenState extends State<AccountScreen> {
             Switch(
               value: twoFactorEnabled,
               onChanged: (value) {
-                if (value) {
-                  setState(() {
-                    showTwoFAPassword = true;
-                    twoFAPasswordError = '';
-                  });
-                } else {
-                  _toggleTwoFactor(false);
-                }
+                setState(() {
+                  showTwoFAPassword = true;
+                  _pendingTwoFAValue = value;
+                  twoFAPasswordError = '';
+                  twoFAPasswordController.clear();
+                });
               },
               activeColor: forest,
             ),
@@ -670,6 +672,7 @@ class _AccountScreenState extends State<AccountScreen> {
             obscure: !showTwoFAPassword,
             showPassword: showTwoFAPassword,
             onToggle: () => setState(() => showTwoFAPassword = !showTwoFAPassword),
+            onChanged: (value) => setState(() {}),
           ),
           if (twoFAPasswordError.isNotEmpty)
             Padding(
@@ -682,9 +685,23 @@ class _AccountScreenState extends State<AccountScreen> {
           Row(
             children: [
               Expanded(
+                child: OutlinedButton(
+                  onPressed: () => setState(() {
+                    showTwoFAPassword = false;
+                    twoFAPasswordController.clear();
+                    twoFAPasswordError = '';
+                  }),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: forest,
+                  ),
+                  child: const Text('Cancel'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
                 child: FilledButton(
                   onPressed: twoFAPasswordController.text.isNotEmpty && !toggling2FA
-                      ? () => _toggleTwoFactor(true)
+                      ? () => _toggleTwoFactor(_pendingTwoFAValue ?? false)
                       : null,
                   style: FilledButton.styleFrom(
                     backgroundColor: forest,
@@ -697,20 +714,6 @@ class _AccountScreenState extends State<AccountScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
                       : const Text('Confirm'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => setState(() {
-                    showTwoFAPassword = false;
-                    twoFAPasswordController.clear();
-                    twoFAPasswordError = '';
-                  }),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: forest,
-                  ),
-                  child: const Text('Cancel'),
                 ),
               ),
             ],

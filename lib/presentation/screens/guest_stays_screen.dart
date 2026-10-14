@@ -26,11 +26,12 @@ class _GuestStaysScreenState extends State<GuestStaysScreen> {
   }
 
   Future<void> _loadBookings() async {
+    if (!mounted) return;
     setState(() => loading = true);
     try {
       final token = AccountStore.instance.token;
       if (token == null) {
-        setState(() => bookings = []);
+        if (mounted) setState(() => bookings = []);
         return;
       }
 
@@ -38,6 +39,8 @@ class _GuestStaysScreenState extends State<GuestStaysScreen> {
         AuthService.getReservations(token),
         AuthService.getRooms(),
       ]);
+
+      if (!mounted) return;
 
       final roomsList = roomsData.map((r) => r as Map<String, dynamic>).toList();
       final bookingsList = bookingsData.map((b) => b as Map<String, dynamic>).toList();
@@ -57,10 +60,11 @@ class _GuestStaysScreenState extends State<GuestStaysScreen> {
         rooms = roomsList;
       });
     } catch (e) {
+      if (!mounted) return;
       showAppMessage(context, 'Failed to load reservations: $e');
       setState(() => bookings = []);
     } finally {
-      setState(() => loading = false);
+      if (mounted) setState(() => loading = false);
     }
   }
 
